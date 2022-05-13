@@ -1,16 +1,21 @@
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Column, Integer, String, Float
-from flask_marshmallow import Marshmallow
 import os
+from flask_marshmallow import Marshmallow
+from flask_jwt_extended import JWTManager, jwt_required, create_access_token
 
 app = Flask(__name__)
+basedir = os.path.abspath(os.path.dirname(__file__))
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'jwt.db')
+app.config['JWT_SECRET_KEY'] = 'super-secret'  # Change on production
+
+
 
 db = SQLAlchemy(app)
 ma = Marshmallow(app)
+jwt = JWTManager(app)
 
-basedir = os.path.abspath(os.path.dirname(__file__))
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'jwt.db')
 
 # DB set up and seeders
 @app.cli.command('db_create')
@@ -28,9 +33,9 @@ def db_drop():
 @app.cli.command('db_seed')
 def db_seed():
     test_user = User(first_name='Stephen',
-                        last_name='Hawking',
-                        email='admin@admin.com',
-                        password='admin')
+                     last_name='Hawking',
+                     email='admin@admin.com',
+                     password='admin')
     db.session.add(test_user)
     db.session.commit()
     print('Database seeded')
@@ -38,8 +43,10 @@ def db_seed():
 
 # Planet Routes
 @app.route('/', methods=['GET'])
+@jwt_required()
 def index():
-    return jsonify(message='Welcome to flask!')
+    return jsonify(message="Hello Flask!")
+
 
 
 # User routes
@@ -59,6 +66,23 @@ def register():
         return jsonify(message='User created successfully'), 201
 
 
+@app.route('/login', methods=['POST'])
+def login():
+    if request.is_json:
+        email = request.json['email']
+        password = request.json['password']
+    else:
+        email = request.form['email']
+        password = request.form['password']
+
+    test = User.query.filter_by(email=email, password=password).first()
+    if test:
+        access_token = create_access_token(identity=email)
+        return jsonify(message='Login Successful', access_token=access_token)
+    else:
+        return jsonify('Bad email or Password'), 401
+
+
 # Database models
 class User(db.Model):
     __tablename__ = 'users'
@@ -68,6 +92,7 @@ class User(db.Model):
     email = Column(String, unique=True)
     password = Column(String)
 
+
 # DB Schemas
 class UserSchema(ma.Schema):
     class Meta:
@@ -75,6 +100,10 @@ class UserSchema(ma.Schema):
 
 
 
+# Marsh mellow db adds
+user_schema = UserSchema()
+users_schema = UserSchema(many=True)
+
+
 if __name__ == '__main__':
-    db_create()
     app.run()
